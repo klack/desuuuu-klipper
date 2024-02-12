@@ -62,7 +62,7 @@ class SerialHostScreen:
 
     def gcode_output_handler(self, msg):
         self._last_gcode_output = msg
-        print(msg)
+        self.send_text(msg)
 
     def _screen_update(self, eventtime):
    
