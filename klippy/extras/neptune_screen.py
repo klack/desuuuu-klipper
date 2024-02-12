@@ -57,13 +57,15 @@ class SerialHostScreen:
         self.serial_bridge.register_callback(
             self._handle_serial_bridge_response)
 
-        self._update_interval = 2
+        self._update_interval = 10
         self._update_timer = self.reactor.register_timer(self._screen_update)
 
     def gcode_output_handler(self, msg):
         self._last_gcode_output = msg
+        print(msg)
 
     def _screen_update(self, eventtime):
+   
         stats = self.printer.lookup_object(
             "print_stats").get_status(self.reactor.monotonic())
 
@@ -113,39 +115,31 @@ class SerialHostScreen:
 
     def _handle_serial_bridge_response(self, data):
         byte_debug = ' '.join(['0x{:02x}'.format(byte) for byte in data])
-        self.log("Received message: " + byte_debug)
-        messages = []
+        self.log("R: " + byte_debug)
+        completed_messages = []
         message = self._last_message if self._last_message else None
 
         for byte in data:
-            if byte != 0x0D:
+            if byte != 0x0D: # Not a carriage return
                 if message is None:
                     message = Message()  # Start a new message if not already started
                     message.payload = []
                 message.payload.append(byte)  # Add current byte to the message payload
-            else:
+            else: # Carriage return recieved
                 if message is not None:  # If there's a message being constructed
-                    messages.append(message)  # Add the completed message to the list
+                    completed_messages.append(message)  # Add the completed message to the list
                     message = None  # Reset the message to start a new one
                 self._last_message = None  # Reset the last message                
         # If a message is not terminated by a newline at the end of the data,
         # keep it as the last message to continue with the next incoming data.
         self._last_message = message
 
-        for message in messages:
-            self.log("Message complete")
-            # message.process_datagram()  # Process each completed message
-            # self.process_message(message)  # Further processing of the message
+        for message in completed_messages:
+            self.process_message(message)  # Process each completed message
 
     def process_message(self, message):
-        self.log("Process message: " + str(message))
-
-        move = self.printer.lookup_object("gcode_move")
-        extrusion_factor = move.extrude_factor
-
-        if message.command == DGUS_CMD_READVAR:
-            for Processor in CommandProcessors:
-                Processor.process_if_match(message, self)
+        self.log("Processing message: " + str(message))
+        self.run_delayed_gcode(str(message))
 
     def run_delayed_gcode(self, gcode, callback=None):
         self._gcode_callbacks[
@@ -291,7 +285,7 @@ class SerialHostScreen:
         self.send_text("com_star")
         self.send_text("rest")
         self.reactor.register_timer(
-            self._screen_init, self.reactor.monotonic() + 2.)
+        self._screen_init, self.reactor.monotonic() + 2.)
         return self.reactor.NEVER
 
 def load_config(config):
@@ -299,38 +293,11 @@ def load_config(config):
 
 class Message:
     def __init__(self):
-        self.command = None
         self.payload = []
-        self.length = None
-        self.command_data_length = None
-        self.command_data = None
-        self.command_address = None
-
-    def process_datagram(self):
-        self.command = self.payload[0]
-        self.command_address = (
-            (self.payload[1] & 0xff) << 8) | (self.payload[2] & 0xff)
-        self.command_data_length = self.payload[3]
-
-        self.command_data = []
-        it = iter(self.payload[4:])
-        for byte in it:
-            self.command_data.append(((byte & 0xff) << 8) | (next(it) & 0xff))
 
     def __str__(self):
-        payload_str = ' '.join(['0x%02x' % byte for byte in self.payload])
-        return 'payload: %s, ' \
-            'length: %s, command: 0x%02x, ' \
-            'command_address: 0x%04x ' \
-            'command_data_length: %s, ' \
-            'command_data: %s' % (
-                payload_str,
-                self.length,
-                self.command,
-                self.command_address,
-                self.command_data_length,
-                self.command_data
-            )
+        return bytes(self.payload).decode('utf-8')
+    
 DGUS_KEY_MAIN_PAGE = 0x1002
 DGUS_KEY_STOP_PRINT = 0x1008
 DGUS_KEY_PAUSE_PRINT = 0x100A
