@@ -13,7 +13,7 @@ SERIAL_HEADER_BYTE_2 = 0xa5
 DGUS_CMD_WRITEVAR = 0x82
 DGUS_CMD_READVAR = 0x83
 
-class NeptuneScreen:
+class SerialHostScreen:
     def __init__(self, config):
         self._serial_state = None
         self._serial_state = SERIAL_STATE_HEADER_NONE
@@ -118,35 +118,24 @@ class NeptuneScreen:
         message = self._last_message if self._last_message else None
 
         for byte in data:
-            #self.log(f"Process data: state {self._serial_state} {message}")
-            if self._serial_state == SERIAL_STATE_HEADER_NONE:
-                if byte == SERIAL_HEADER_BYTE_1:
-                    self._serial_state = SERIAL_STATE_HEADER_ONE
-                else:
-                    self._serial_state = SERIAL_STATE_HEADER_NONE
-            elif self._serial_state == SERIAL_STATE_HEADER_ONE:
-                if byte == SERIAL_HEADER_BYTE_2:
-                    self._serial_state = SERIAL_STATE_HEADER_TWO
-                else:
-                    self._serial_state = SERIAL_STATE_HEADER_NONE
-            elif self._serial_state == SERIAL_STATE_HEADER_TWO:
-                self._serial_state = SERIAL_STATE_HEADER_MESSAGE
-                message = Message()
-                message.payload = []
-                message.length = byte
-                self._last_message = message
-            elif self._serial_state == SERIAL_STATE_HEADER_MESSAGE:
-                message.payload.append(byte)
-
-                if len(message.payload) == message.length:
-                    messages.append(message)
-                    message = None
-                    self._last_message = None
-                    self._serial_state = SERIAL_STATE_HEADER_NONE
+            if byte != 0x0D:
+                if message is None:
+                    message = Message()  # Start a new message if not already started
+                    message.payload = []
+                message.payload.append(byte)  # Add current byte to the message payload
+            else:
+                if message is not None:  # If there's a message being constructed
+                    messages.append(message)  # Add the completed message to the list
+                    message = None  # Reset the message to start a new one
+                self._last_message = None  # Reset the last message                
+        # If a message is not terminated by a newline at the end of the data,
+        # keep it as the last message to continue with the next incoming data.
+        self._last_message = message
 
         for message in messages:
-            message.process_datagram()
-            self.process_message(message)
+            self.log("Message complete")
+            # message.process_datagram()  # Process each completed message
+            # self.process_message(message)  # Further processing of the message
 
     def process_message(self, message):
         self.log("Process message: " + str(message))
@@ -292,10 +281,10 @@ class NeptuneScreen:
 
     def log(self, msg, *args, **kwargs):
         if self._logging:
-            logging.info("Neptune Screen: " + str(msg))
+            logging.info("SerialHost: " + str(msg))
 
     def error(self, msg, *args, **kwargs):
-        logging.error("Neptune Screen: " + str(msg))
+        logging.error("SerialHost: " + str(msg))
 
     def _reset_screen(self, eventtime):
         self.log("Reset")
@@ -306,7 +295,7 @@ class NeptuneScreen:
         return self.reactor.NEVER
 
 def load_config(config):
-    return NeptuneScreen(config)
+    return SerialHostScreen(config)
 
 class Message:
     def __init__(self):
